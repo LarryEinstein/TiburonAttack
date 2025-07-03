@@ -98,6 +98,14 @@ function love.load()
     score = 0
     game_time = 0
     
+    -- Combo system variables
+    combo_count = 0            -- Current combo multiplier (0 means none)
+    combo_timer = 0            -- Time remaining to extend the combo
+    combo_duration = 2         -- Seconds allowed between bites to keep combo going
+
+    -- Tail-bubble timer (for bubble trail while moving)
+    tail_bubble_timer = 0
+    
     -- Underwater background color (deep blue)
     background_color = {0.1, 0.3, 0.6}
     
@@ -108,6 +116,16 @@ function love.load()
     -- Initialize some menu bubbles
     for i = 1, 15 do
         create_bubble()
+    end
+
+    -- Leveling system
+    level = 1
+    fish_eaten = 0
+    fish_target = 10 -- fish needed for next level
+
+    -- Store initial speed for each fish type (for resetting levels)
+    for _, t in ipairs(fish_types) do
+        t.initial_speed = t.speed
     end
 end
 
@@ -222,7 +240,16 @@ function update_game(dt)
         
         -- Check collision with shark (eating!)
         if check_collision(shark, f) then
-            score = score + f.points
+            -- Combo logic: increase multiplier if we are still within the combo window
+            if combo_timer > 0 then
+                combo_count = combo_count + 1
+            else
+                combo_count = 1
+            end
+            combo_timer = combo_duration
+            score = score + f.points * combo_count -- Apply combo multiplier to points
+            fish_eaten = fish_eaten + 1
+            check_level_up()
             table.remove(fish, i)
         end
         
@@ -231,6 +258,28 @@ function update_game(dt)
         if f.age > 30 then -- Remove after 30 seconds
             table.remove(fish, i)
         end
+    end
+
+    -- Combo timer countdown
+    if combo_timer > 0 then
+        combo_timer = combo_timer - dt
+        if combo_timer <= 0 then
+            combo_timer = 0
+            combo_count = 0
+        end
+    end
+
+    -- Tail bubble trail when moving
+    if moving then
+        tail_bubble_timer = tail_bubble_timer + dt
+        if tail_bubble_timer > 0.1 then
+            local bubble_x = (shark.facing == 1) and shark.x or (shark.x + shark.width)
+            local bubble_y = shark.y + shark.height / 2
+            create_bubble(bubble_x, bubble_y, love.math.random(2, 5), love.math.random(30, 60))
+            tail_bubble_timer = 0
+        end
+    else
+        tail_bubble_timer = 0
     end
 end
 
@@ -398,8 +447,19 @@ function draw_game()
     
     -- Game stats ONLY (NO TITLE AT ALL!)
     love.graphics.print("Score: " .. score, 10, 10)
-    love.graphics.print("Fish Eaten: " .. math.floor(score/10), 10, 30)
-    love.graphics.print("Time: " .. math.floor(game_time) .. "s", 10, 50)
+    love.graphics.print("Fish Eaten: " .. fish_eaten .. "/" .. fish_target, 10, 30)
+    love.graphics.print("Level: " .. level, 10, 50)
+    love.graphics.print("Time: " .. math.floor(game_time) .. "s", 10, 70)
+    
+    -- Show combo multiplier near the shark
+    if combo_count > 1 then
+        love.graphics.setFont(fonts.button)
+        love.graphics.setColor(1, 0.9, 0.3, 1)
+        local combo_text = "x" .. combo_count
+        love.graphics.print(combo_text, shark.x + shark.width / 2 - fonts.button:getWidth(combo_text) / 2, shark.y - 30)
+        love.graphics.setFont(fonts.ui)
+        love.graphics.setColor(1, 1, 1, 1)
+    end
     
     -- Instructions with smaller font
     love.graphics.setFont(fonts.small)
@@ -479,18 +539,18 @@ function check_collision(rect1, rect2)
            rect2.y < rect1.y + rect1.height
 end
 
-function create_bubble()
+function create_bubble(custom_x, custom_y, custom_size, custom_speed)
     local window_width = love.graphics.getWidth()
     local window_height = love.graphics.getHeight()
-    
+
     local bubble = {
-        x = love.math.random(0, window_width),
-        y = window_height + 10,
-        size = love.math.random(3, 12),
-        speed = love.math.random(15, 45),
+        x = custom_x or love.math.random(0, window_width),
+        y = custom_y or window_height + 10,
+        size = custom_size or love.math.random(3, 12),
+        speed = custom_speed or love.math.random(15, 45),
         age = 0
     }
-    
+
     table.insert(bubbles, bubble)
 end
 
@@ -531,7 +591,37 @@ function restart_game()
     fish = {}
     score = 0
     game_time = 0
+
+    -- Reset combo and leveling systems
+    combo_count = 0
+    combo_timer = 0
+    level = 1
+    fish_eaten = 0
+    fish_target = 10
+    fish_spawn_rate = 2.0
+    tail_bubble_timer = 0
+
+    -- Reset fish speeds to their initial values
+    for _, t in ipairs(fish_types) do
+        t.speed = t.initial_speed
+    end
+
+    -- Reset shark position and facing
     shark.x = 400
     shark.y = 300
     shark.facing = 1
+end
+
+function check_level_up()
+    if fish_eaten >= fish_target then
+        level = level + 1
+        fish_eaten = fish_eaten - fish_target
+        fish_target = math.ceil(fish_target * 1.5)
+
+        -- Increase difficulty: faster fish and quicker spawns
+        fish_spawn_rate = math.max(0.5, fish_spawn_rate - 0.1)
+        for _, t in ipairs(fish_types) do
+            t.speed = t.speed + 5
+        end
+    end
 end 
